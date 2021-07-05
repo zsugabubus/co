@@ -1,1 +1,1 @@
-#define CO_VERBOSE 3
+#define CO_VERBOSE 0

@@ -26,35 +26,31 @@
 
 typedef struct co_t co_t;
 struct co_t {
-	void *frame;
-	co_t *caller;
-	unsigned char done;
-	void *stack; /* Bottom. */
-	size_t stack_size;
-#if 1 <= CO_VERBOSE
-	char name[16];
+	void *co_frame;
+	co_t *co_caller;
+	unsigned char co_done;
+	void *co_stack; /* Bottom. */
+	size_t co_stack_sz;
+#ifdef CO_HAVE_VALGRIND
+	unsigned long co_vg_stack_id;
 #endif
+#if 1 <= CO_VERBOSE
+	char co_name[16];
+#endif
+};
+
+typedef struct co_stackless_t co_stackless_t;
+struct co_stackless_t {
+	co_t *co_caller;
+	void *co_ip;
 };
 
 #define co_coroutine __attribute__((naked))
 
-# if 0
-co_stackless
-void *hello(World *arg)
-{
-	int z = arg * arg;
-}
-#endif
-
-typedef struct co_nested_t co_nested_t;
-struct co_nested_t {
-	co_t c;
-};
-
 /**
  * Currently executing coroutine.
  */
-/* _Thread_local  */ co_t *co_self;
+/* _Thread_local */ co_t *co_self;
 
 int co_alloc_stack(co_t *c, size_t stack_size);
 
@@ -73,20 +69,21 @@ co_set_name(co_t *c, char const *name)
 {
 #if 1 <= CO_VERBOSE
 	size_t n = strlen(name) + 1 /* NUL */;
-	if (sizeof c->name < n)
-		n = sizeof c->name;
-	memcpy(c->name, name, n);
+	if (sizeof c->co_name < n)
+		n = sizeof c->co_name;
+	memcpy(c->co_name, name, n);
 #else
 	(void)c;
 	(void)name;
 #endif
 }
 
+__attribute__((always_inline))
 static inline char const *
 co_get_name(co_t const *c)
 {
-#if 0 < CO_NAME_SIZE
-	return c->name;
+#if 1 <= CO_VERBOSE
+	return c->co_name;
 #else
 	(void)c;
 	return NULL;
@@ -105,15 +102,42 @@ co_get_name(co_t const *c)
  */
 void *co_resume(co_t *c, void *arg);
 
+#if 1
+/* https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html */
+/* Attribute makes sure all registers are dead. */
+/* __attribute__((returns_twice)) */
+__attribute__((always_inline))
+static inline co_stackless_t *
+co_goto(co_stackless_t *c)
+{
+	__asm__ volatile(
+			"int3\n"
+			"lea .Lresume%=(%%rip),%%rdx\n\t"
+			"mov %[saved],%%rax\n\t"
+			"mov %%rdx,%[saved]\n\t"
+			"jmp *%%rax\n\t"
+			".Lresume%=:\n\t"
+			: [saved] "+m"(c->co_ip)
+			:
+			: "cc", "rax", "rdx", "memory"
+	);
+	return c;
+}
+#endif
+
 /**
  * Resume caller coroutine.
  *
  * @see co_resume
  */
+__attribute__((always_inline))
 static inline void *
 co_yield(void *arg)
 {
-	return co_resume(co_self->caller, arg);
+#if 0
+	printf("yield to %s\n", co_get_name(co_self->caller));
+#endif
+	return co_resume(co_self->co_caller, arg);
 }
 
 #endif /* CO_H */

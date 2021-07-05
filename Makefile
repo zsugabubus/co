@@ -1,9 +1,14 @@
 all : co
 
-co : co.c Makefile
-	$(CC) -g -std=gnu11 -Wall -Wextra -o $@ $<
+CFLAGS += -O1 -g -std=gnu11 -Wall -Wextra
+
+# CFLAGS += -D'CO_HAVE_VALGRIND'
+# LDFLAGS += $(shell pkg-config --libs --cflags valgrind)
+
+co : t.c co.c co.h config.h Makefile
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 run : co
-	gdb $< -ex run
+	gdb $< -ex 'set confirm no' -ex run
 
 .PHONY : all
