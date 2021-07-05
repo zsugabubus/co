@@ -15,17 +15,19 @@
 
 #include "co.h"
 
+#define CO_ORDER_PUSH(x, y) x y
+#define CO_ORDER_POP(x, y) y x
+
 /* Callee-saved registers. */
 #ifdef __x86_64__
-# define CO_REGS \
-	xmacro(r12, 0x08) \
-	xmacro(r13, 0x10) \
-	xmacro(r14, 0x18) \
-	xmacro(r15, 0x20) \
-	xmacro(rdx, 0x28) \
-	xmacro(rcx, 0x30) \
-	xmacro(rbx, 0x38) \
-	xmacro(rbp, 0x40)
+# define CO_REGS(order) \
+	order(xmacro(r12), \
+	order(xmacro(r13), \
+	order(xmacro(r14), \
+	order(xmacro(r15), \
+	order(xmacro(rdx), \
+	order(xmacro(rcx), \
+	      xmacro(rbx)))))))
 /* Except %rbp. */
 #endif
 
@@ -83,7 +85,7 @@ co_init(co_t *c, void *routine(void *))
 # endif
 
 			/* Registers will receive garbage. */
-			/* "sub %[nsaved],%%rsp\n\t" */
+			"sub %[nsaved],%%rsp\n\t"
 
 			"mov %%rsp,%[their_stack]\n\t"
 
@@ -94,8 +96,7 @@ co_init(co_t *c, void *routine(void *))
 
 			: [routine] "r"(routine),
 			  [co_trampoline] "m"(co_trampoline),
-			  [co_return] "m"(co_return)
-# if 0
+			  [co_return] "m"(co_return),
 			  [nsaved] "i"(
 #define xmacro(name) +sizeof(uint64_t)
 				CO_REGS(CO_ORDER_PUSH)
@@ -105,7 +106,6 @@ co_init(co_t *c, void *routine(void *))
 # endif
 				/*+ sizeof(uint64_t) */ /* => !((%rsp + 8) % 16) -> MUST be popped accordingly */
 			  )
-#endif
 			: "rax"
 	);
 #endif
@@ -159,9 +159,9 @@ co_resume(co_t *c, void *arg)
 			/* "mov (%%rsp),%%rax\n\t" */
 #endif
 			/* Save our registers. */
-			/* Make sure that we are in the red zone. */
-#define xmacro(name, offset) "mov %%"#name",-"#offset"(%%rsp)\n\t"
-			CO_REGS
+			"push %%rbp\n\t"
+#define xmacro(name) "push %%"#name"\n\t"
+			CO_REGS(CO_ORDER_PUSH)
 #undef xmacro
 
 			"mov %%rsp,%[our_frame]\n\t"
@@ -183,9 +183,10 @@ co_resume(co_t *c, void *arg)
 			"mov %[arg],%%rax\n\t"
 
 			/* Restore their registers. */
-#define xmacro(name, offset) "mov -"#offset"(%%rsp),%%"#name"\n\t"
-			CO_REGS
+#define xmacro(name) "pop %%"#name"\n\t"
+			CO_REGS(CO_ORDER_POP)
 #undef xmacro
+			"pop %%rbp\n\t"
 
 			"ret\n\t"
 
@@ -200,8 +201,8 @@ co_resume(co_t *c, void *arg)
 			  [arg] "r"(arg)
 
 			:
-#define xmacro(name, offset) #name,
-			  CO_REGS
+#define xmacro(name) #name,
+			  CO_REGS(CO_ORDER_POP)
 #undef xmacro
 			  /* Return value. */
 			  "rax");
