@@ -89,7 +89,7 @@ co_get_name(Coroutine const *c)
 }
 
 /**
- * Resume stackless coroutine from state if not NULL; otherwise do nothing.
+ * Resume stackless coroutine from state. Zero can be used for ground state.
  */
 #define co_resumep(state) do { \
 	goto *(&&co_start_ + state); \
