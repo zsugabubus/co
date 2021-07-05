@@ -99,6 +99,12 @@ co_start_: \
 #define CO_TOKENPASTE__(a, b) a##b
 #define CO_TOKENPASTE_(a, b) CO_TOKENPASTE__(a, b)
 
+#ifndef CO_NDEBUG
+# define CO_YIELDP_CHECK_(state) assert(((state) == &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_))
+#else
+# define CO_YIELDP_CHECK_(state)
+#endif
+
 /**
  * Save coroutine state and yield with value.
  *
@@ -106,6 +112,7 @@ co_start_: \
  */
 #define co_yieldp(state, ... /* value */) do { \
 	(state) = &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_; \
+	CO_YIELDP_CHECK_(state); \
 	return __VA_ARGS__; \
 CO_TOKENPASTE_(co_resume_at_, __LINE__): \
 } while (0)
