@@ -1,8 +1,11 @@
-#include "co.c"
+#include <stdio.h>
+#include <assert.h>
 
-static co_t executor;
+#include "co.h"
 
-void *coproc(void *arg)
+static Coroutine executor;
+
+void *coproc(Coroutine *me, void *arg)
 {
 	/* register void *rsp asm("rsp"); */
 	/* printf("rrrsp %p\n", rsp); */
@@ -11,19 +14,23 @@ void *coproc(void *arg)
 
 	printf("deadbeef=%p\n", arg);
 	printf("self=%p\n", co_self);
+
+	assert((void *)co_self == me);
+	assert((void *)&executor == me->co_caller);
+
 	for (int i = 0; i < 20000000; ++i) {
-		/* printf("%d\n", i); */
-		co_yield(&i);
+		/* printf("i=%d\n", i); */
+		co_switch_fast(me, &executor, &i);
 	}
-	printf("got=%p\n", co_yield((void *)0xbabe));
+	printf("got=%p\n", co_yield_fast((void *)0xbabe));
 	return (void *)0x53536;
 }
 
 char stack[40096]/* __attribute((aligned(8)))*/;
 
-int ma(int z, int k, int b, int t, int u, void *c)
+int ma(int z, int b, int t, int u, void *c)
 {
-	(void)z, (void)k, (void)b, (void)t, (void)u, (void)c;
+	(void)z, (void)b, (void)t, (void)u, (void)c;
 	co_self = &executor;
 
 	/* void *stack = alloca(10000); */
@@ -35,50 +42,44 @@ int ma(int z, int k, int b, int t, int u, void *c)
 
 	/* memset(stack, 0xcd, sizeof stack); */
 
-	co_t test;
+	Coroutine test;
 	test.co_stack = (&stack)[1];
 	test.co_stack_sz = sizeof stack;
 
 	printf("k\n");
 
-	co_alloc_stack(&test, 1 << 16);
+	co_alloc_stack((void *)&test, 1 << 16);
 
 	printf("bb\n");
 
-	co_init(&test, coproc/*, (void *)0xbeef*/);
+	co_create_fast(&test, coproc);
+	test.co_caller = &executor;
 
-	co_set_name(&test, "test");
+	co_set_name((void *)&test, "test");
 
-	printf("a\n");
-	{
-		/* register void *rsp asm("rbp");
-		printf(">>> MAIN y rsp=%p\n", rsp); */
+	co_resume_fast(&test, (void *)0xdeadbeef);
+
+	while (!test.co_done) {
+		/* printf("bicikil\n"); */
+		co_resume_fast(&test, (void *)0x777);
 	}
-
-	co_resume(&test, (void *)0xdeadbeef);
-
-	{
-		/* register void *rsp asm("rbp");
-		printf(">>> MAIN x rsp=%p\n", rsp); */
-	}
-
-	while (!test.co_done)
-		co_resume(&test, (void *)0x777);
 
 	return 0;
 }
 
 int z()
 {
-	return ma(9, 4, 1, 3, 2, &z);
+	return ma(9, 1, 3, 2, &z);
 }
 
+#if 0
 void
 sl(co_stackless_t *c)
 {
 	c = co_goto(c);
 	c = co_goto(c);
 }
+#endif
 
 int main()
 {
