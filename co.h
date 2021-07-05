@@ -16,7 +16,7 @@
 	order(xmacro(rdx), \
 	order(xmacro(rcx), \
 	      xmacro(rbx)))))))
-# define CO_STACK_DIRECTION -
+# define CO_STACK_SIZE(bottom /* Coroutine.co_stack */, top /* Coroutine.co_frame */) ((bottom) - (top))
 #else
 # error "Unimplemented target architecture"
 #endif
@@ -24,7 +24,7 @@
 typedef struct coroutine Coroutine;
 struct coroutine {
 	/**
-	 * Frame pointer (%rsp).
+	 * Frame pointer (%sp).
 	 *
 	 * User data for a coroutine can be stored aside Coroutine
 	 * (struct { Coroutine c, ... }) or at the bottom of the stack. Before
@@ -88,33 +88,26 @@ co_get_name(Coroutine const *c)
 #endif
 }
 
-#if 0
-typedef struct co_stackless_t co_stackless_t;
-struct co_stackless_t {
-	Coroutine *co_caller;
-	void *co_ip;
-};
+/**
+ * Resume stackless coroutine from state if not NULL; otherwise do nothing.
+ */
+#define co_resumep(state) do { \
+	goto *(&&co_start_ + state); \
+co_start_: \
+} while (0)
 
-/* https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html */
-/* Attribute makes sure all registers are dead. */
-/* __attribute__((returns_twice)) */
-__attribute__((always_inline))
-static inline co_stackless_t *
-co_goto(co_stackless_t *c)
-{
-	__asm__ volatile(
-			"int3\n"
-			"lea .Lresume%=(%%rip),%%rdx\n\t"
-			"mov %[saved],%%rax\n\t"
-			"mov %%rdx,%[saved]\n\t"
-			"jmp *%%rax\n\t"
-			".Lresume%=:\n\t"
-			: [saved] "+m"(c->co_ip)
-			:
-			: "cc", "rax", "rdx", "memory"
-	);
-	return c;
-}
-#endif
+#define CO_TOKENPASTE__(a, b) a##b
+#define CO_TOKENPASTE_(a, b) CO_TOKENPASTE__(a, b)
+
+/**
+ * Save coroutine state and yield with value.
+ *
+ * Note that co_yieldp() can be used to call nested stackless coroutines.
+ */
+#define co_yieldp(state, ... /* value */) do { \
+	(state) = &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_; \
+	return __VA_ARGS__; \
+CO_TOKENPASTE_(co_resume_at_, __LINE__): \
+} while (0)
 
 #endif /* CO_H */
