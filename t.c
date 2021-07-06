@@ -85,6 +85,8 @@ int ma(int z, int b, int t, int u, void *c)
 		co_resume_fast(&test, (void *)0x777);
 	}
 
+	co_free_stack(&test);
+
 	return 0;
 }
 

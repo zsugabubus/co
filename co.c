@@ -11,6 +11,8 @@
 
 #include "co.h"
 
+#define CO_STACK_GROWSDOWN (CO_STACK_SIZE(0, 1) < 0)
+
 static __attribute__((naked))
 void
 co_trampoline(void)
@@ -25,7 +27,7 @@ co_trampoline(void)
 	 *   2. Return value of the first co_switch(they, me, arg).
 	 */
 #ifdef __x86_64__
-	__asm__(
+	__asm__ volatile(
 			"pop %%rdi\n\t"
 			"mov %%rax,%%rsi\n\t"
 			"ret\n\t"
@@ -35,30 +37,26 @@ co_trampoline(void)
 	__builtin_unreachable();
 }
 
-static void
-co_return(void);
-
 int
 co_alloc_stack(Coroutine *c, size_t stack_sz)
 {
-	void *p = mmap(NULL, stack_sz, PROT_READ|PROT_WRITE,
+	void *p = mmap(NULL, stack_sz,
+			PROT_READ | PROT_WRITE,
 #ifdef MAP_STACK
 			MAP_STACK |
 #endif
 #ifdef MAP_GROWSDOWN
-			MAP_GROWSDOWN |
+			(CO_STACK_GROWSDOWN ? MAP_GROWSDOWN : 0) |
 #endif
 			MAP_ANONYMOUS |
-			MAP_PRIVATE, -1, 0);
+			MAP_PRIVATE,
+			-1, 0);
 	if (MAP_FAILED == p)
 		return -1;
 
-#ifdef __x86_64__
-	c->co_stack = (char *)p + stack_sz;
-#endif
+	c->co_stack = p + (CO_STACK_GROWSDOWN ? stack_sz : 0);
 	c->co_stack_sz = stack_sz;
-
-	c->co_frame =c->co_stack;
+	c->co_frame = c->co_stack;
 
 	return 0;
 }
@@ -66,7 +64,8 @@ co_alloc_stack(Coroutine *c, size_t stack_sz)
 void
 co_free_stack(Coroutine *c)
 {
-	munmap((void *)c->co_stack, c->co_stack_sz);
+	int ret = munmap((char *)c->co_stack - (CO_STACK_GROWSDOWN ? c->co_stack_sz : 0), c->co_stack_sz);
+	assert(0 <= ret);
 }
 
 #define CO_INCLUDE_FILE "co.c.inc"
