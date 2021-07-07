@@ -11,4 +11,7 @@ co : t.c co.* Makefile
 run : co
 	gdb $< -ex 'set confirm no' -ex run
 
-.PHONY : all
+clean :
+	$(RM) co
+
+.PHONY : all clean
