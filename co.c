@@ -1,17 +1,23 @@
-#include <alloca.h>
-#include <assert.h>
-#include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
-#include <sys/mman.h>
-
-#if CO_HAVE_VALGRIND
-# include <valgrind.h>
-#endif
 
 #include "co.h"
 
-#define CO_STACK_GROWSDOWN (CO_STACK_SIZE(0, 1) < 0)
+#define CO_ORDER_PUSH(x, y) x y
+#define CO_ORDER_POP(x, y) y x
+
+#ifdef __x86_64__
+/* Except %bp. */
+# define CO_CALLEE_SAVED(order) \
+	order(xmacro(r12), \
+	order(xmacro(r13), \
+	order(xmacro(r14), \
+	order(xmacro(r15), \
+	order(xmacro(rbx), \
+	order(xmacro(rcx), \
+	      xmacro(rdx)))))))
+#else
+# error "Unimplemented target architecture"
+#endif
 
 static __attribute__((naked))
 void
@@ -30,43 +36,116 @@ co_trampoline(void)
 	__asm__ volatile(
 			"pop %%rdi\n\t"
 			"mov %%rax,%%rsi\n\t"
-			"ret\n\t"
+			"pop %%rax\n\t"
+			"jmp *%%rax\n\t"
 		::
 	);
 #endif
 	__builtin_unreachable();
 }
 
-int
-co_alloc_stack(Coroutine *c, size_t stack_sz)
-{
-	void *p = mmap(NULL, stack_sz,
-			PROT_READ | PROT_WRITE,
-#ifdef MAP_STACK
-			MAP_STACK |
-#endif
-#ifdef MAP_GROWSDOWN
-			(CO_STACK_GROWSDOWN ? MAP_GROWSDOWN : 0) |
-#endif
-			MAP_ANONYMOUS |
-			MAP_PRIVATE,
-			-1, 0);
-	if (MAP_FAILED == p)
-		return -1;
-
-	c->co_stack = p + (CO_STACK_GROWSDOWN ? stack_sz : 0);
-	c->co_stack_sz = stack_sz;
-	c->co_frame = c->co_stack;
-
-	return 0;
-}
-
 void
-co_free_stack(Coroutine *c)
+co_create(void **pstack, void *routine(void **, void *), unsigned fast)
 {
-	int ret = munmap((char *)c->co_stack - (CO_STACK_GROWSDOWN ? c->co_stack_sz : 0), c->co_stack_sz);
-	assert(0 <= ret);
+	void *their_stack = *pstack;
+	void *saved_stack = saved_stack;
+
+#ifdef __x86_64__
+	__asm__(
+			"mov %%rsp,%[saved_stack]\n\t"
+
+			/* Setup their stack and initial frame. */
+			"mov %[their_stack],%%rsp\n\t"
+
+			/* A dummy return address. */
+			"pushq $0\n\t"
+
+			"push %[routine]\n\t"
+			"push %[opaque]\n\t"
+
+			/* Registers will receive garbage. */
+			"sub %[nsaved],%%rsp\n\t"
+
+			"lea %[co_trampoline],%%rax\n\t" "push %%rax\n\t"
+			"mov %%rsp,%[their_stack]\n\t"
+
+			"mov %[saved_stack],%%rsp\n\t"
+
+			: [saved_stack] "+r"(saved_stack),
+			  [their_stack] "+r"(their_stack)
+
+			: [routine] "r"(routine),
+			  [opaque] "r"(pstack),
+			  [co_trampoline] "m"(co_trampoline),
+			  [nsaved] "r"(
+				(sizeof 0 - sizeof 0)
+# define xmacro(name) +8
+				+ (fast
+				? 0
+# if CO_HAVE_BP
+					xmacro(rbp)
+# endif
+				: 0
+					xmacro(rbp)
+					CO_CALLEE_SAVED(CO_ORDER_PUSH)
+				)
+# undef xmacro
+			  )
+			: "rax"
+	);
+#endif
+	*pstack = their_stack;
 }
 
-#define CO_INCLUDE_FILE "co.c.inc"
-#include "co.inc"
+__attribute__((optimize("-O3"), naked, hot))
+void *
+co_switch(void **restrict pfrom, void **restrict pto, void *arg)
+{
+#ifdef __x86_64__
+	__asm__ volatile(
+			/* Make return value to be pop'ed first on resume. */
+			"pop %%r11\n\t"
+
+			/* Save our registers. */
+# define xmacro(name) "push %%"#name"\n\t"
+			xmacro(rbp)
+			CO_CALLEE_SAVED(CO_ORDER_PUSH)
+# undef xmacro
+
+			"push %%r11\n\t"
+			"mov %%rsp,%[our_frame]\n\t"
+# ifndef CO_NDEBUG
+			/* Update return address and %bp. */
+			"mov %[stack],%%rsp\n\t"
+			"push %%r11\n\t"
+			"push %%rbp\n\t"
+# endif
+			/* Move to their frame. */
+			"mov %[frame],%%rsp\n\t"
+
+			"pop %%r11\n\t"
+
+			/* Restore their registers. */
+# define xmacro(name) "pop %%"#name"\n\t"
+			CO_CALLEE_SAVED(CO_ORDER_POP)
+			xmacro(rbp)
+# undef xmacro
+
+			"jmp *%%r11\n\t"
+
+			: [our_frame] "=m"(*pfrom)
+
+			: [frame] "r"(*pto),
+			   "a"(arg)
+
+			:
+# define xmacro(name) #name,
+			  CO_CALLEE_SAVED(CO_ORDER_POP)
+# undef xmacro
+#  if !CO_HAVE_BP
+			  "rbp",
+#  endif
+			  "r11"
+			);
+#endif
+}

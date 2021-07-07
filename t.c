@@ -1,158 +1,168 @@
+#include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <assert.h>
+#include <stdlib.h>
 
 #include "co.h"
 
-static Coroutine executor;
+#define GET_STACK_BOTTOM(stack) ((&stack)[CO_STACK_SIZE(0, 1) < 0])
+#define container_of(ptr, type, member) ((type *)((char *)(ptr) - offsetof(type, member)))
 
-int
-f(int depth, int i)
-{
-	static char buf[50];
-	sprintf(buf, "f(%d, %d)", depth, i);
-	co_yield(buf);
-	return i <= 1 ? 1 : f(depth + 1, i - 1) + f(depth + 1, i - 2);
-}
+#define ARG(x) ((void *)(uintptr_t)(x))
 
-void *
-f_routine(Coroutine *me, void *)
-{
-	(void)me;
-
-	return (void *)(uintptr_t)f(0, 10);
-}
-
-void *coproc(Coroutine *me, void *arg)
-{
-	/* register void *rsp asm("rsp"); */
-	/* printf("rrrsp %p\n", rsp); */
-
-	/* assert(!(((uintptr_t)rsp + 8) % 16)); */
-	co_switch_fast(me, &executor, NULL);
-
-	if (0){
-	printf("deadbeef=%p\n", arg);
-	printf("self=%p\n", co_self);
-
-	assert((void *)co_self == me);
-	assert((void *)&executor == me->co_caller);
-
-	for (int i = 0; i < 20/*000000*/; ++i) {
-		/* printf("i=%d\n", i); */
-		co_switch_fast(me, &executor, &i);
-	}
-	printf("got=%p\n", co_yield_fast((void *)0xbabe));
-	}
-	return (void *)0x53536;
-}
-
-char stack[40096]/* __attribute((aligned(8)))*/;
-
-int ma(int z, int b, int t, int u, void *c)
-{
-	(void)z, (void)b, (void)t, (void)u, (void)c;
-	co_self = &executor;
-
-	/* void *stack = alloca(10000); */
-	/* Dummy stack needed for debug info. */
-	char dummy[16];
-	co_self->co_stack = dummy;
-
-	co_set_name(&executor, "executor");
-
-	/* memset(stack, 0xcd, sizeof stack); */
-
-	Coroutine test;
-	test.co_stack = (&stack)[1];
-	test.co_stack_sz = sizeof stack;
-
-	printf("k\n");
-
-	co_alloc_stack((void *)&test, 1 << 16);
-
-	printf("bb\n");
-
-	co_create_fast(&test, coproc);
-	test.co_caller = &executor;
-
-	co_set_name((void *)&test, "test");
-
-	co_resume_fast(&test, (void *)0xdeadbeef);
-
-	while (!test.co_done) {
-		/* printf("bicikil\n"); */
-		co_resume_fast(&test, (void *)0x777);
-	}
-
-	co_free_stack(&test);
-
-	return 0;
-}
+typedef struct Coroutine Coroutine;
+struct Coroutine {
+	void *frame;
+	Coroutine *caller;
+	int done;
+};
 
 typedef struct {
 	uintptr_t state;
 	int i;
 	char buf[20];
-} S;
+} StacklessCoroutine;
 
-int
-sl(S *s)
+static Coroutine executor;
+
+static void
+co_yield(Coroutine *me, void *arg)
 {
-	co_resumep(s->state);
-
-	while (s->i < 20000000) {
-		/* sprintf(s->buf, "%d", s->i); */
-		co_yieldp(s->state, 1);
-	}
-
-	return 0;
+	co_switch(&me->frame, &me->caller->frame, arg);
 }
 
-int z()
+static void *
+co_resume(Coroutine *me, Coroutine *you, void *arg)
 {
-	S s = {};
-	for (; sl(&s); ++s.i);
-		/* puts(s.buf); */
+	you->caller = me;
+	return co_switch(&me->frame, &you->frame, arg);
+}
 
-	return 0;
+int
+f(Coroutine *me, int depth, int i)
+{
+	static char buf[50];
 
-	co_self = &executor;
+	sprintf(buf, "f(%d, %d)", depth, i);
+	co_yield(me, buf);
 
+	return i <= 1 ? 1 : f(me, depth + 1, i - 1) + f(me, depth + 1, i - 2);
+}
+
+void *
+sf(void **pframe, void *arg)
+{
+	Coroutine *me = container_of(pframe, Coroutine, frame);
+
+	printf("%s ", (char *)arg);
+	co_switch_fast(&me->frame, &executor.frame, "world!");
+
+	co_switch_fast(&me->frame, &me->frame, ARG(1));
+
+	for (int i = 0; i < 20000000; ++i) {
+		/* printf("%d\n", i); */
+		co_switch_fast(&me->frame, &executor.frame, ARG(1));
+	}
+
+	printf("---\n");
+	co_switch_fast(&me->frame, &executor.frame, ARG(0));
+}
+
+void *
+fibonacci_routine(void **pframe, void *n)
+{
+	Coroutine *me = container_of(pframe, Coroutine, frame);
+
+	co_switch(&me->frame, &executor.frame, "bye");
+	void *res = ARG(f(me, 0, (uintptr_t)n));
+
+	co_yield(me, "k");
+
+	me->done = 1;
+	co_yield(me, res);
+}
+
+static void
+fibonacci(void)
+{
+	Coroutine *me = &executor;
+
+	char callee_stack[1 << 12] __attribute__((aligned(16)));
 	Coroutine c;
-	co_alloc_stack((void *)&c, 1 << 12);
+	c.done = 0;
+	c.frame = GET_STACK_BOTTOM(callee_stack);
 
-	co_create(&c, f_routine);
+	printf("c.stack= -%p\n", c.frame);
+	co_create(&c.frame, fibonacci_routine, 0);
+
+	/* printf("me = %p\n", co_switch(&me->frame, &me->frame, ARG(20))); */
+	/* __asm__("int3"); */
+	co_resume(me, &c, (void *)(uintptr_t)4);
 
 	void *buf = "create";
 
 	for (;;) {
-		printf("stack size is %zd bytes at %s\n", CO_STACK_SIZE(c.co_stack, c.co_frame), (char *)buf);
-		buf = co_resume(&c, NULL);
-		if (c.co_done) {
-			printf("result is %d\n", (int)(uintptr_t)buf);
+		printf("stack size is %zd bytes at %s @%p %p\n", CO_STACK_SIZE(GET_STACK_BOTTOM(callee_stack), (char *)c.frame), (char *)buf, c.frame, executor.frame);
+		buf = co_resume(me, &c, NULL);
+		if (c.done) {
+			printf("result is %d %d %p %p\n", c.done, (int)(uintptr_t)buf, c.frame, executor.frame);
 			break;
 		}
 	}
+}
+
+static int
+sl(StacklessCoroutine *c)
+{
+	co_resumep(c->state);
+
+	while (c->i < 20000000)
+		co_yieldp(c->state, 1);
 
 	return 0;
-	/* return ma(9, 1, 3, 2, &z); */
 }
+
+int main(int argc, char *argv[])
+{
+	(void)argc;
+
+	char executor_stack[CO_STACK_SIZE_MIN(0)] __attribute__((aligned(16)));
+
+	executor.frame = GET_STACK_BOTTOM(executor_stack);
+
+	char which = 1 < argc ? argv[1][0] : '\0';
+#define T(l, name) if ((!which || which == #l[0]) && (printf("=== [%c] %s ===\n", #l[0], #name), 1))
+
+	T(l, stackless) {
+		StacklessCoroutine c;
+		c.state = 0;
+		for (; sl(&c); ++c.i);
+	}
+
+	T(f, fibonacci)
+		fibonacci();
 
 #if 0
-void
-sl(co_stackless_t *c)
-{
-	c = co_goto(c);
-	c = co_goto(c);
-}
+	T(s, self)
+		for (int i = 0; i < 20000000 * 2;)
+			++*(int *)co_switch(&executor.frame, &executor.frame, &i);
+
+	T(S, self-fast)
+		for (int i = 0; i < 20000000 * 2;)
+			++*(int *)co_switch_fast(&executor.frame, &executor.frame, &i);
 #endif
 
-int main()
-{
-	/* co_stackless_t c;
-	c.ip = sl;
-	co_goto(&c);
- */
-	return z();
+	T(2, switch2) {
+		char spinner_stack[1 << 12] __attribute__((aligned(16)));
+		Coroutine spinner;
+		spinner.frame = GET_STACK_BOTTOM(spinner_stack);
+
+		co_create(&spinner.frame, sf, 1);
+
+		/* printf("yes = %s\n", (char *)co_switch_fast(&executor.frame, &executor.frame, "no")); */
+
+		printf("%s\n", (char *)co_switch_fast(&executor.frame, &spinner.frame, "Hello"));
+		while (co_switch_fast(&executor.frame, &spinner.frame, (void *)0x777));
+	}
 }
