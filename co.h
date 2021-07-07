@@ -2,12 +2,17 @@
 #define CO_H
 
 /**
- * -fno-omit-frame-pointer is present.
+ * Preserve %bp across context switches.
+ *
+ * If asm("":::"rbp") compiles, CO_SAVE_BP should be 0. It may be 1, just
+ * will be slower a bit.
  */
-#ifndef CO_HAVE_BP
-/* At worst case it is saved but not used. */
-/* !CO_HAVE_BP <=> asm("":::"rbp") compiles. */
-# define CO_HAVE_BP 0
+#ifndef CO_SAVE_BP
+# if defined(__OPTIMIZE__) && __OPTIMIZE__
+#  define CO_SAVE_BP 0
+# else
+#  define CO_SAVE_BP 1
+# endif
 #endif
 
 #define CO_IF_(cond, then, else) CO_IF__(cond, then, else)
@@ -17,8 +22,6 @@
 
 #define CO_TOKENPASTE__(x, y) x##y
 #define CO_TOKENPASTE_(x, y) CO_TOKENPASTE__(x, y)
-
-#define co_fast_coroutine CO_IF_(CO_HAVE_BP, , __attribute__((optimize("-fomit-frame-pointer"))))
 
 /**
  * Initialize stack for coroutine. Coroutine will be waked up on first
@@ -45,7 +48,7 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 	void **pto_ = (pto); \
 	void *arg_ = (arg); \
 	__asm__ volatile( \
-			CO_IF_(CO_HAVE_BP, "push %%rbp\n\t", "") \
+			CO_IF_(CO_SAVE_BP, "push %%rbp\n\t", "") \
  \
 			/* Save our return address. */ \
 			"lea .Lco_fast_resume%=(%%rip),%%r11\n\t" \
@@ -65,7 +68,7 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 			".align 8\n\t" \
 		".Lco_fast_resume%=:\n\t" \
  \
-			CO_IF_(CO_HAVE_BP, "pop %%rbp\n\t", "") \
+			CO_IF_(CO_SAVE_BP, "pop %%rbp\n\t", "") \
  \
 			: [our_frame] "=m"(*pfrom_) \
  \
@@ -78,7 +81,8 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 	__asm__(""::: \
 			"memory", \
 			"rax", "rbx", "rcx", "rdx", \
-			CO_IF_(CO_HAVE_BP, "cc" /* Placeholder. */, "rbp"), "rsi", "rdi", \
+			CO_IF_(CO_SAVE_BP, "cc" /* Placeholder. */, "rbp" /* Can be clobbered thus "saved" by compiler. */), \
+			"rsi", "rdi", \
 			"r8", "r9", "r10", "r11", \
 			"r12", "r13", "r14", "r15", \
 			"cc"); \

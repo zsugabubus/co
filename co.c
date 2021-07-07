@@ -52,7 +52,7 @@ co_create(void **pstack, void *routine(void **, void *), void return_routine(voi
 	__asm__(
 			"mov %%rsp,%[saved_stack]\n\t"
 
-			/* Setup their stack and initial frame. */
+			/* Setup their stack and required boilerplate frame. */
 			"mov %[their_stack],%%rsp\n\t"
 
 			"lea %[co_trampoline],%%rax\n\t"
@@ -87,7 +87,7 @@ co_create(void **pstack, void *routine(void **, void *), void return_routine(voi
 # define xmacro(name) +8
 				+ (fast
 				? 0
-# if CO_HAVE_BP
+# if CO_RESTORE_BP
 					xmacro(rbp)
 # endif
 				: 0
@@ -119,12 +119,7 @@ co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 
 			"push %%r11\n\t"
 			"mov %%rsp,%[our_frame]\n\t"
-# ifndef CO_NDEBUG
-			/* Update return address and %bp. */
-			"mov %[stack],%%rsp\n\t"
-			"push %%r11\n\t"
-			"push %%rbp\n\t"
-# endif
+
 			/* Move to their frame. */
 			"mov %[frame],%%rsp\n\t"
 
@@ -147,7 +142,7 @@ co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 # define xmacro(name) #name,
 			  CO_CALLEE_SAVED(CO_ORDER_POP)
 # undef xmacro
-#  if !CO_HAVE_BP
+#  if !CO_RESTORE_BP
 			  "rbp",
 #  endif
 			  "r11"

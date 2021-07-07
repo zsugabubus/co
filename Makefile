@@ -1,17 +1,22 @@
-all : co
+all : check
 
-CFLAGS += -O3 -g -std=gnu11 -Wall -Wextra
+check :
+	set -eu; \
+	for O in -O0 -Os -O3; do \
+	for fp in '-DCO_SAVE_BP=1 -fno-omit-frame-pointer' '-DCO_SAVE_BP=0 -fomit-frame-pointer'; do \
+		CFLAGS="$$O $$fp" $(MAKE) check-one; \
+	done; \
+	done; \
+	$(MAKE) clean
 
-# CFLAGS += -D'CO_HAVE_VALGRIND'
-# LDFLAGS += $(shell pkg-config --libs --cflags valgrind)
+run :
+	gdb check -ex 'set confirm no' -ex 'set layout asm' -ex run
 
-co : t.c co.* Makefile
-	$(CC) -DNDEBUG -DCO_NDEBUG $(CFLAGS) $(LDFLAGS) -o $@ $< co.c
-
-run : co
-	gdb $< -ex 'set confirm no' -ex run
+check-one :
+	$(CC) $(CFLAGS)	-o check -w -g -std=gnu11 t.c co.c
+	perf stat ./check
 
 clean :
-	$(RM) co
+	$(RM) check
 
-.PHONY : all clean
+.PHONY : all check check-one clean
