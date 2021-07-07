@@ -96,7 +96,7 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
  */
 #define co_resumep(pstate) do { \
 	goto *(&&co_start_ + *(pstate)); \
-co_start_: \
+co_start_:; \
 } while (0)
 
 /**
@@ -109,7 +109,7 @@ co_start_: \
 	(void)state; \
 	assert(state == &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_); \
 	return __VA_ARGS__; \
-CO_TOKENPASTE_(co_resume_at_, __LINE__): \
+CO_TOKENPASTE_(co_resume_at_, __LINE__):; \
 } while (0)
 
 #endif /* CO_H */

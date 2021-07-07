@@ -1,5 +1,10 @@
 all : check
 
+PERF := perf stat
+ifeq ($(CI),true)
+	PERF := # Nothing.
+endif
+
 check :
 	set -eu; \
 	for O in -O0 -Os -O3; do \
@@ -14,7 +19,7 @@ run :
 
 check-one :
 	$(CC) $(CFLAGS)	-o check -w -g -std=gnu11 t.c co.c
-	perf stat ./check
+	$(PERF) ./check
 
 clean :
 	$(RM) check
