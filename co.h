@@ -89,8 +89,8 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 /**
  * Resume stackless coroutine from state. Zero can be used for ground state.
  */
-#define co_resumep(state) do { \
-	goto *(&&co_start_ + state); \
+#define co_resumep(pstate) do { \
+	goto *(&&co_start_ + *(pstate)); \
 co_start_: \
 } while (0)
 
@@ -99,9 +99,10 @@ co_start_: \
  *
  * Note that co_yieldp() can be used to call nested stackless coroutines.
  */
-#define co_yieldp(state, ... /* value */) do { \
-	(state) = &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_; \
-	assert(((state) == &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_)); \
+#define co_yieldp(pstate, ... /* value */) do { \
+	void *state = (void *)(*(pstate) = &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_); \
+	(void)state; \
+	assert(state == &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_); \
 	return __VA_ARGS__; \
 CO_TOKENPASTE_(co_resume_at_, __LINE__): \
 } while (0)

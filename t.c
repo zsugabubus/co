@@ -115,10 +115,10 @@ fibonacci(void)
 static int
 sl(StacklessCoroutine *c)
 {
-	co_resumep(c->state);
+	co_resumep(&c->state);
 
 	while (c->i < 20000000)
-		co_yieldp(c->state, 1);
+		co_yieldp(&c->state, 1);
 
 	return 0;
 }
