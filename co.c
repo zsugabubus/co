@@ -1,5 +1,3 @@
-#include <stdint.h>
-
 #include "co.h"
 
 #define CO_ORDER_PUSH(x, y) x y
