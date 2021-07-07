@@ -50,6 +50,15 @@ f(Coroutine *me, int depth, int i)
 	return i <= 1 ? 1 : f(me, depth + 1, i - 1) + f(me, depth + 1, i - 2);
 }
 
+void
+sf_bye(void **pframe, void *arg)
+{
+	Coroutine *me = container_of(pframe, Coroutine, frame);
+
+	puts(arg);
+	co_switch_fast(&me->frame, &executor.frame, ARG(0));
+}
+
 void *
 sf(void **pframe, void *arg)
 {
@@ -65,8 +74,7 @@ sf(void **pframe, void *arg)
 		co_switch_fast(&me->frame, &executor.frame, ARG(1));
 	}
 
-	printf("---\n");
-	co_switch_fast(&me->frame, &executor.frame, ARG(0));
+	return "---";
 }
 
 void *
@@ -94,7 +102,7 @@ fibonacci(void)
 	c.frame = GET_STACK_BOTTOM(callee_stack);
 
 	printf("c.stack= -%p\n", c.frame);
-	co_create(&c.frame, fibonacci_routine, 0);
+	co_create(&c.frame, fibonacci_routine, NULL, 0);
 
 	/* printf("me = %p\n", co_switch(&me->frame, &me->frame, ARG(20))); */
 	/* __asm__("int3"); */
@@ -158,7 +166,7 @@ int main(int argc, char *argv[])
 		Coroutine spinner;
 		spinner.frame = GET_STACK_BOTTOM(spinner_stack);
 
-		co_create(&spinner.frame, sf, 1);
+		co_create(&spinner.frame, sf, sf_bye, 1);
 
 		/* printf("yes = %s\n", (char *)co_switch_fast(&executor.frame, &executor.frame, "no")); */
 

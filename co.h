@@ -25,8 +25,9 @@
  * co_switch() and will routine() will receive that arg.
  *
  * @param fast Must be 1 or 0. (May will be flags later.)
+ * @param return_routine Routine to call when user return from routine.
  */
-void co_create(void **pstack, void *routine(void **pstack, void *arg), unsigned fast);
+void co_create(void **pstack, void *routine(void **pstack, void *arg), void return_routine(void **pstack, void *return_value), unsigned fast);
 
 /**
  * Perform context switching.

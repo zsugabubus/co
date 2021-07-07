@@ -43,7 +43,7 @@ co_trampoline(void)
 }
 
 void
-co_create(void **pstack, void *routine(void **, void *), unsigned fast)
+co_create(void **pstack, void *routine(void **, void *), void return_routine(void **pstack, void *return_value), unsigned fast)
 {
 	void *their_stack = *pstack;
 	void *saved_stack = saved_stack;
@@ -55,16 +55,22 @@ co_create(void **pstack, void *routine(void **, void *), unsigned fast)
 			/* Setup their stack and initial frame. */
 			"mov %[their_stack],%%rsp\n\t"
 
-			/* A dummy return address. */
-			"pushq $0\n\t"
+			"lea %[co_trampoline],%%rax\n\t"
+
+			"push %[return_routine]\n\t"
+			"test %[return_routine],%[return_routine]\n\t"
+			"jz .L0\n\t"
+			"push %[pstack]\n\t"
+			"push %%rax\n\t"
+		".L0:\n\t"
 
 			"push %[routine]\n\t"
-			"push %[opaque]\n\t"
+			"push %[pstack]\n\t"
 
 			/* Registers will receive garbage. */
 			"sub %[nsaved],%%rsp\n\t"
 
-			"lea %[co_trampoline],%%rax\n\t" "push %%rax\n\t"
+			"push %%rax\n\t"
 			"mov %%rsp,%[their_stack]\n\t"
 
 			"mov %[saved_stack],%%rsp\n\t"
@@ -73,7 +79,8 @@ co_create(void **pstack, void *routine(void **, void *), unsigned fast)
 			  [their_stack] "+r"(their_stack)
 
 			: [routine] "r"(routine),
-			  [opaque] "r"(pstack),
+			  [pstack] "r"(pstack),
+			  [return_routine] "r"(return_routine),
 			  [co_trampoline] "m"(co_trampoline),
 			  [nsaved] "r"(
 				(sizeof 0 - sizeof 0)
