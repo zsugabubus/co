@@ -2,17 +2,35 @@
 #define CO_H
 
 /**
- * Preserve %bp across context switches.
- *
- * If asm("":::"rbp") compiles, CO_SAVE_BP should be 0. It may be 1, just
- * will be slower a bit.
+ * Symbols ending in _ are considered private.
  */
-#ifndef CO_SAVE_BP
+
+/**
+ * CO_HAVE_FRAMEPOINTER := -fno-omit-frame-pointer present.
+ *
+ * %bp requires special handling when compiler treats %bp special and not as a
+ * general purpose register. This behavior can also be changed on per function
+ * basis using __attribute__((optimize("-f[no-]omit-frame-pointer"))).
+ *
+ * Misconfiguring this option either results in a compile-time error or runtime
+ * overhead but never generates faulty code.
+ */
+#ifndef CO_HAVE_FRAMEPOINTER
 # if defined(__OPTIMIZE__) && __OPTIMIZE__
-#  define CO_SAVE_BP 0
+#  define CO_HAVE_FRAMEPOINTER 0
 # else
-#  define CO_SAVE_BP 1
+#  define CO_HAVE_FRAMEPOINTER 1
 # endif
+#endif
+
+/**
+ * CO_HAVE_REDZONE := -mred-zone present.
+ *
+ * -mred-zone := 1, CO_HAVE_REDZONE := 0, co_switch_fast() => bad things may
+ * happen.
+ */
+#ifndef CO_HAVE_REDZONE
+# define CO_HAVE_REDZONE 1
 #endif
 
 #define CO_IF_(cond, then, else) CO_IF__(cond, then, else)
@@ -24,53 +42,69 @@
 #define CO_TOKENPASTE_(x, y) CO_TOKENPASTE__(x, y)
 
 /**
- * Initialize stack for coroutine. Coroutine will be waked up on first
- * co_switch() and will routine() will receive that arg.
+ * Create a suspended coroutine. Routine will be called at the very first time
+ * when coroutine is waked up.
  *
- * @param fast Must be 1 or 0. (May will be flags later.)
- * @param return_routine Routine to call when user return from routine.
+ * @param spp Location of the stack pointer, i.e. the state. Must be
+ *            initialized to the required bottom of the stack.
+ * @param return_routine Routine to call when control returns from passed
+ *                       routine. Pass NULL if you do not want to return.
  */
-void co_create(void **pstack, void *routine(void **pstack, void *arg), void return_routine(void **pstack, void *return_value), unsigned fast);
+#define co_create(spp, routine, return_routine) co_create_(spp, routine, return_routine, 0)
+#define co_create_fast(spp, routine, return_routine) co_create_(spp, routine, return_routine, 1)
+void co_create_(void **spp, void *routine(void **spp, void *arg), void return_routine(void **spp, void *return_value), unsigned fast);
 
 /**
- * Perform context switching.
+ * Transfer control between coroutines: suspend from and wake up to. Passed
+ * arg will be returned by co_switch*() that made the suspension.
  *
- * Save current context into from and load new context from to. Passed arg will
- * be returned for the woken up co_switch().
+ * Stack pointer of the suspended coroutine (from) is updated. When coroutine
+ * is in a suspended state its stack and its stack pointer (*from) may be
+ * freely moved unless it remains consistent. Use CO_STACK_SIZE() to determine
+ * direction and size of the stack.
+ *
+ * Non-/co_*_fast() kind of routines have different undelying mechanism for
+ * state preservation, thus wake up and suspension of a coroutine must be
+ * performed by routines from the same kind.
  */
 void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 
 #ifdef __x86_64__
-# define CO_STACK_SIZE_MIN(fast) (((fast ? 1 : 8) /* General registers. */ + (1 + 1) /* IP. */) * 8)
+# define CO_STACK_SIZE_MIN (128 /* Red zone. */ + 1 * 8 /* %bp */ + 6 * 8 /* Boilerplate. */)
 # define CO_STACK_SIZE(bottom, top) ((bottom) - (top))
 # define co_switch_fast(pfrom, pto, arg) ({ \
 	void **pfrom_ = (pfrom); \
 	void **pto_ = (pto); \
 	void *arg_ = (arg); \
 	__asm__ volatile( \
-			CO_IF_(CO_SAVE_BP, "push %%rbp\n\t", "") \
+			/* Step over red zone. */ \
+			CO_IF_(CO_HAVE_REDZONE, "sub $128,%%rsp\n\t", "") \
+			CO_IF_(CO_HAVE_FRAMEPOINTER, "push %%rbp\n\t", "") \
  \
 			/* Save our return address. */ \
 			"lea .Lco_fast_resume%=(%%rip),%%r11\n\t" \
 			"push %%r11\n\t" \
  \
 			 /* Save our %sp. */ \
-			"mov %%rsp,%[our_frame]\n\t" \
+			"mov %%rsp,(%[our_frame])\n\t" \
  \
 			/* Restore their %sp. */ \
 			"mov %[frame],%%rsp\n\t" \
  \
 			/* Resume they; basically a "ret" but uses branch predictor. */ \
 			"pop %%r11\n\t" \
+			CO_IF_(CO_HAVE_FRAMEPOINTER, "pop %%rbp\n\t", "") \
+			CO_IF_(CO_HAVE_REDZONE, "add $128,%%rsp\n\t", "") \
 			"jmp *%%r11\n\t" \
  \
 			/* Will arrive here. */ \
 			".align 8\n\t" \
 		".Lco_fast_resume%=:\n\t" \
  \
-			CO_IF_(CO_SAVE_BP, "pop %%rbp\n\t", "") \
- \
-			: [our_frame] "=m"(*pfrom_) \
+			: /* We have to ensure that this address will not be \
+			     %sp relative and GCC detects it as an output \
+			     memory address. */ \
+			  [our_frame] "+&r"(pfrom_) \
  \
 			: [frame] "r"(*pto_), \
 			   "a"(arg_) \
@@ -81,7 +115,7 @@ void *co_switch(void **restrict pfrom, void **restrict pto, void *arg);
 	__asm__(""::: \
 			"memory", \
 			"rax", "rbx", "rcx", "rdx", \
-			CO_IF_(CO_SAVE_BP, "cc" /* Placeholder. */, "rbp" /* Can be clobbered thus "saved" by compiler. */), \
+			CO_IF_(CO_HAVE_FRAMEPOINTER, "cc" /* Placeholder. */, "rbp" /* Can be clobbered thus "saved" by compiler. */), \
 			"rsi", "rdi", \
 			"r8", "r9", "r10", "r11", \
 			"r12", "r13", "r14", "r15", \

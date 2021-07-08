@@ -102,7 +102,7 @@ fibonacci(void)
 	c.frame = GET_STACK_BOTTOM(callee_stack);
 
 	printf("c.stack= -%p\n", c.frame);
-	co_create(&c.frame, fibonacci_routine, NULL, 0);
+	co_create(&c.frame, fibonacci_routine, NULL);
 
 	/* printf("me = %p\n", co_switch(&me->frame, &me->frame, ARG(20))); */
 	/* __asm__("int3"); */
@@ -135,7 +135,7 @@ int main(int argc, char *argv[])
 {
 	(void)argc;
 
-	char executor_stack[CO_STACK_SIZE_MIN(0)] __attribute__((aligned(16)));
+	char executor_stack[CO_STACK_SIZE_MIN] __attribute__((aligned(16)));
 
 	executor.frame = GET_STACK_BOTTOM(executor_stack);
 
@@ -166,7 +166,7 @@ int main(int argc, char *argv[])
 		Coroutine spinner;
 		spinner.frame = GET_STACK_BOTTOM(spinner_stack);
 
-		co_create(&spinner.frame, sf, sf_bye, 1);
+		co_create_fast(&spinner.frame, sf, sf_bye);
 
 		/* printf("yes = %s\n", (char *)co_switch_fast(&executor.frame, &executor.frame, "no")); */
 

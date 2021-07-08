@@ -17,92 +17,80 @@
 # error "Unimplemented target architecture"
 #endif
 
-static __attribute__((naked))
-void
+ __attribute__((naked))
+static void
 co_trampoline(void)
 {
-	/**
-	 * Waking up a coroutine for the first time requires special handling,
-	 * because we must transform the return from co_switch() to be a call
-	 * to routine() with the following arguments:
-	 *
-	 *   1. Coroutine self reference. It is on the stack.
-	 *
-	 *   2. Return value of the first co_switch(they, me, arg).
-	 */
 #ifdef __x86_64__
 	__asm__ volatile(
-			"pop %%rdi\n\t"
-			"mov %%rax,%%rsi\n\t"
+			"pop %%rdi\n\t" /* Pop => 1st arg. */
+			"mov %%rax,%%rsi\n\t" /* Return value => 2nd arg. */
 			"pop %%rax\n\t"
-			"jmp *%%rax\n\t"
+			"jmp *%%rax\n\t" /* Pop => Call. */
 		::
 	);
 #endif
-	__builtin_unreachable();
 }
 
+/* Setup stack for a suspended coroutine. */
 void
-co_create(void **pstack, void *routine(void **, void *), void return_routine(void **pstack, void *return_value), unsigned fast)
+co_create_(void **spp, void *routine(void **, void *), void return_routine(void **, void *), unsigned fast)
 {
-	void *their_stack = *pstack;
-	void *saved_stack = saved_stack;
+	register void *saved_sp = saved_sp;
 
 #ifdef __x86_64__
-	__asm__(
-			"mov %%rsp,%[saved_stack]\n\t"
+	__asm__ volatile(
+			"mov %%rsp,%[saved_sp]\n\t"
 
-			/* Setup their stack and required boilerplate frame. */
-			"mov %[their_stack],%%rsp\n\t"
+			"mov (%[spp]),%%rsp\n\t"
 
 			"lea %[co_trampoline],%%rax\n\t"
 
 			"push %[return_routine]\n\t"
 			"test %[return_routine],%[return_routine]\n\t"
-			"jz .L0\n\t"
-			"push %[pstack]\n\t"
+			"jz .L0%=\n\t"
+			"push %[spp]\n\t"
 			"push %%rax\n\t"
-		".L0:\n\t"
+		".L0%=:\n\t"
 
 			"push %[routine]\n\t"
-			"push %[pstack]\n\t"
+			"push %[spp]\n\t"
 
 			/* Registers will receive garbage. */
 			"sub %[nsaved],%%rsp\n\t"
 
 			"push %%rax\n\t"
-			"mov %%rsp,%[their_stack]\n\t"
+			"mov %%rsp,(%[spp])\n\t"
 
-			"mov %[saved_stack],%%rsp\n\t"
+			"mov %[saved_sp],%%rsp\n\t"
 
-			: [saved_stack] "+r"(saved_stack),
-			  [their_stack] "+r"(their_stack)
+			: [saved_sp] "+&r"(saved_sp)
 
 			: [routine] "r"(routine),
-			  [pstack] "r"(pstack),
+			  [spp] "r"(spp),
 			  [return_routine] "r"(return_routine),
 			  [co_trampoline] "m"(co_trampoline),
-			  [nsaved] "r"(
+			  [nsaved] "g"(
 				(sizeof 0 - sizeof 0)
 # define xmacro(name) +8
 				+ (fast
 				? 0
-# if CO_RESTORE_BP
+# if CO_HAVE_FRAMEPOINTER
 					xmacro(rbp)
 # endif
+					+ CO_IF_(CO_HAVE_REDZONE, 128, 0)
 				: 0
 					xmacro(rbp)
 					CO_CALLEE_SAVED(CO_ORDER_PUSH)
 				)
 # undef xmacro
 			  )
-			: "rax"
+			: "rax", "memory"
 	);
 #endif
-	*pstack = their_stack;
 }
 
-__attribute__((optimize("-O3"), naked, hot))
+__attribute__((naked, hot))
 void *
 co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 {
@@ -120,6 +108,8 @@ co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 			"push %%r11\n\t"
 			"mov %%rsp,%[our_frame]\n\t"
 
+			/* /\ */
+
 			/* Move to their frame. */
 			"mov %[frame],%%rsp\n\t"
 
@@ -133,7 +123,7 @@ co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 
 			"jmp *%%r11\n\t"
 
-			: [our_frame] "=m"(*pfrom)
+			: [our_frame] "=&m"(*pfrom)
 
 			: [frame] "r"(*pto),
 			   "a"(arg)
@@ -142,7 +132,7 @@ co_switch(void **restrict pfrom, void **restrict pto, void *arg)
 # define xmacro(name) #name,
 			  CO_CALLEE_SAVED(CO_ORDER_POP)
 # undef xmacro
-#  if !CO_RESTORE_BP
+#  if !CO_HAVE_FRAMEPOINTER
 			  "rbp",
 #  endif
 			  "r11"
