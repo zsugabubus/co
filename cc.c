@@ -8,9 +8,10 @@
 #define CC_STACK_GROWSDOWN (CO_STACK_SIZE(0, 1) < 0)
 
 static void
-cc_on_return(Coroutine *self, void *arg)
+cc_returned(Coroutine *self, void *arg)
 {
-	cc_return(self, arg);
+	(void)self;
+	cc_return(CC_SELF_A_ arg);
 }
 
 void
@@ -35,7 +36,7 @@ cc_create(Coroutine *self, void *routine(Coroutine *self, void *arg))
 		return -ENOSPC;
 
 	cc_reset_(self);
-	CO_IF_(CC_USE_FAST, co_create_fast, co_create)(&self->sp, (void *)routine, (void *)cc_on_return);
+	CO_IF_(CC_USE_FAST, co_create_fast, co_create)(&self->sp, (void *)routine, (void *)cc_returned);
 
 	return 0;
 }

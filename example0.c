@@ -47,18 +47,13 @@ main()
 
 	srand(time(NULL));
 
-	char const *WHO[] = {
+	static char const *WHO[] = {
 		"Samantha",
 		"Simon",
 		"Duck",
 		"Fox",
 	};
-#define NWHO (int)(sizeof(WHO) / sizeof(*WHO))
-
-	if ((rand() % 10000) == (rand() % 10000)) {
-		puts("YOU ARE THE CHOSEN. YOU DO NOT NEED COROUTINES TO BE AWESOME.");
-		abort();
-	}
+	enum { NWHO = sizeof(WHO) / sizeof(*WHO) };
 
 	int m = 12 + rand() % 12;
 

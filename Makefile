@@ -25,10 +25,10 @@ check-one :
 	@# Perf does not return failure when process terminated by a signal.
 	$(PERF) ./check
 
-example : example.c
-	$(CC) -o $@ -Wall -Wextra -g -std=gnu11 example.c co.c cc.c
+example% : example%.c cc.? co.?
+	$(CC) -o $@ -Wall -Wextra -g -std=gnu11 $< co.c cc.c
 
 clean :
-	$(RM) check example
+	$(RM) check example?
 
 .PHONY : all check check-one clean
