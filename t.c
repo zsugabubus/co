@@ -89,6 +89,7 @@ fibonacci_routine(void **pframe, void *n)
 
 	me->done = 1;
 	co_yield(me, res);
+	assert(0);
 }
 
 static void

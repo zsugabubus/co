@@ -20,7 +20,7 @@ run :
 	gdb check -ex 'set confirm no' -ex 'set layout asm' -ex run
 
 check-one :
-	$(CC) $(CFLAGS)	-o check -w -g -std=gnu11 t.c co.c
+	$(CC) $(CFLAGS)	-o check -Wall -Wextra -g -std=gnu11 t.c co.c
 	./check
 	@# Perf does not return failure when process terminated by a signal.
 	$(PERF) ./check

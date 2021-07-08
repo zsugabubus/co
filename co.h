@@ -141,7 +141,7 @@ co_start_:; \
 #define co_yieldp(pstate, ... /* value */) do { \
 	void *state = (void *)(*(pstate) = &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_); \
 	(void)state; \
-	assert(state == &&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_); \
+	assert(state == (void *)(&&CO_TOKENPASTE_(co_resume_at_, __LINE__) - &&co_start_)); \
 	return __VA_ARGS__; \
 CO_TOKENPASTE_(co_resume_at_, __LINE__):; \
 } while (0)
